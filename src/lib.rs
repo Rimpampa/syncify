@@ -2,6 +2,8 @@
 
 mod attr;
 
+use std::marker::PhantomData;
+
 use proc_macro::TokenStream;
 use quote::ToTokens;
 use syn::{
@@ -24,20 +26,21 @@ pub fn syncify_replace(_attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn syncify(attr: TokenStream, item: TokenStream) -> TokenStream {
     let sync_mod_name = parse_macro_input!(attr as Ident);
 
-    let input_mod = parse_macro_input!(item as ItemMod);
+    let mut input_mod = parse_macro_input!(item as ItemMod);
 
     let mut sync_copy = input_mod.clone();
     sync_copy.ident = sync_mod_name;
 
-    let mut visitor = SyncifyVisitor::new();
+    let mut visitor = SyncifyVisitor::<Sync>::new();
     visitor.visit_item_mod_mut(&mut sync_copy);
-    if !visitor.errors.is_empty() {
-        return visitor
-            .errors
-            .into_iter()
-            .map(|e| e.to_compile_error())
-            .collect::<proc_macro2::TokenStream>()
-            .into();
+    if let Some(tokens) = visitor.errors_tokens() {
+        return tokens;
+    }
+
+    let mut visitor = SyncifyVisitor::<Async>::new();
+    visitor.visit_item_mod_mut(&mut input_mod);
+    if let Some(tokens) = visitor.errors_tokens() {
+        return tokens;
     }
 
     let mut out = proc_macro2::TokenStream::new();
@@ -46,20 +49,49 @@ pub fn syncify(attr: TokenStream, item: TokenStream) -> TokenStream {
     out.into()
 }
 
-/// Convert async code into its blocking equivalent:
+/// Sync visitor mode:
 /// * `async fn` becomes `fn`
 /// * `expr.await` becomes `expr`
-struct SyncifyVisitor {
+/// * `#[syncify_replace]` items are replaced
+struct Sync;
+
+/// Async visitor mode: *does nothing*
+struct Async;
+
+/// Handle changes across the sync and async versions of the
+/// modules to which `syncify` is applied.
+struct SyncifyVisitor<Mode> {
+    /// Errors collected during the syncify process.
     errors: Vec<syn::Error>,
+    _mode: PhantomData<Mode>,
 }
 
-impl SyncifyVisitor {
+impl<Mode> SyncifyVisitor<Mode> {
     fn new() -> Self {
-        Self { errors: Vec::new() }
+        Self {
+            errors: Vec::new(),
+            _mode: PhantomData,
+        }
+    }
+
+    /// Returns the errors collected during the syncify process, if any.
+    ///
+    /// The errors are returned as a [`TokenStream`] so they can be emitted as compile errors.
+    fn errors_tokens(self) -> Option<TokenStream> {
+        if self.errors.is_empty() {
+            return None;
+        }
+        Some(
+            self.errors
+                .into_iter()
+                .map(|e| e.to_compile_error())
+                .collect::<proc_macro2::TokenStream>()
+                .into(),
+        )
     }
 }
 
-impl VisitMut for SyncifyVisitor {
+impl VisitMut for SyncifyVisitor<Sync> {
     fn visit_expr_mut(&mut self, i: &mut Expr) {
         visit_expr_mut(self, i);
         if let Expr::Await(expr) = i {
@@ -95,6 +127,8 @@ impl VisitMut for SyncifyVisitor {
         }
     }
 }
+
+impl VisitMut for SyncifyVisitor<Async> {}
 
 /// Remove `syncify_replace` attributes from `use` item, calling `on_replace` with the replacement token stream and span.
 fn strip_replace(item: &mut ItemUse, mut on_replace: impl FnMut(&MetaList)) {
