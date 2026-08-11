@@ -7,18 +7,15 @@ use std::marker::PhantomData;
 use proc_macro::TokenStream;
 use quote::ToTokens;
 use syn::{
-    AttrStyle, Expr, Ident, ItemMod, ItemUse, Meta, MetaList, Signature, parse_macro_input,
-    spanned::Spanned,
+    Expr, Ident, ItemMod, ItemUse, Signature, parse_macro_input,
     visit_mut::{VisitMut, visit_expr_mut, visit_signature_mut},
 };
 
 #[proc_macro_attribute]
 /// Annotate `use` declarations with this to replace them in the syncified copy.
 pub fn syncify_replace(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    // Avoid usage on items that are not `use` declarations.
-    let clone = item.clone();
-    let _ = parse_macro_input!(clone as ItemUse);
-    item
+    let error = outside_use_error("syncify_replace").into_compile_error();
+    join(item, error)
 }
 
 #[proc_macro_attribute]
@@ -55,7 +52,8 @@ pub fn syncify(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// * `#[syncify_replace]` items are replaced
 struct Sync;
 
-/// Async visitor mode: *does nothing*
+/// Async visitor mode:
+/// * `#[syncify_replace]` attributes are removed
 struct Async;
 
 /// Handle changes across the sync and async versions of the
@@ -105,47 +103,42 @@ impl VisitMut for SyncifyVisitor<Sync> {
     }
 
     fn visit_item_use_mut(&mut self, i: &mut ItemUse) {
-        // Honour `syncify_replace` attributes: replace the `use` item with the
-        // replacement it carries, and drop the attribute. Any other attributes are
-        // moved onto the replacement.
-        let mut replacement = None;
-        strip_replace(i, |meta| {
-            let None = replacement else {
-                let err =
-                    syn::Error::new(meta.span(), "syncify_replace attribute used multiple times");
-                self.errors.push(err);
-                return;
-            };
-            match syn::parse2::<ItemUse>(meta.tokens.clone()) {
-                Ok(rep) => replacement = Some(rep),
-                Err(err) => self.errors.push(err),
+        // `syncify_replace` attribute:
+        // replace the `use` item with the replacement it carries, and drop the attribute.
+        // Any other attributes are moved onto the replacement.
+        match attr::extract(i, "syncify_replace") {
+            Ok(Some(attr)) => {
+                let mut replacement = None;
+                match syn::parse2::<syn::UseTree>(attr::tokens(attr).clone()) {
+                    Ok(rep) => replacement = Some(rep),
+                    Err(err) => self.errors.push(err),
+                }
+                if let Some(replacement) = replacement {
+                    i.tree = replacement;
+                }
             }
-        });
-        if let Some(mut replacement) = replacement {
-            replacement.attrs = i.attrs.clone();
-            *i = replacement;
+            Err(e) => self.errors.push(e),
+            Ok(None) => {}
         }
     }
 }
 
-impl VisitMut for SyncifyVisitor<Async> {}
+impl VisitMut for SyncifyVisitor<Async> {
+    fn visit_item_use_mut(&mut self, i: &mut ItemUse) {
+        let _ = attr::extract(i, "syncify_replace");
+    }
+}
 
-/// Remove `syncify_replace` attributes from `use` item, calling `on_replace` with the replacement token stream and span.
-fn strip_replace(item: &mut ItemUse, mut on_replace: impl FnMut(&MetaList)) {
-    item.attrs.retain_mut(|attr| {
-        if !matches!(attr.style, AttrStyle::Outer) {
-            return true;
-        }
-        let Meta::List(meta_list) = &attr.meta else {
-            return true;
-        };
-        let Some(segment) = meta_list.path.segments.last() else {
-            return true;
-        };
-        if segment.ident != "syncify_replace" {
-            return true;
-        }
-        on_replace(meta_list);
-        false
-    });
+/// Returns an error indicating that the `name` macro can only be used inside a
+/// module marked with `#[syncify::syncify]`.
+fn outside_use_error(name: &str) -> syn::Error {
+    syn::Error::new(
+        proc_macro2::Span::call_site(),
+        format!("`{name}` can only be used inside a module marked with `#[syncify::syncify]`"),
+    )
+}
+
+/// Joins two token streams together, in the order they are provided.
+fn join(a: impl Into<TokenStream>, b: impl Into<TokenStream>) -> TokenStream {
+    [a.into(), b.into()].into_iter().collect()
 }
