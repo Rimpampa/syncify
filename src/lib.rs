@@ -1,5 +1,7 @@
 #![doc = include_str!("../README.md")]
 
+mod attr;
+
 use proc_macro::TokenStream;
 use quote::ToTokens;
 use syn::{
