@@ -8,8 +8,8 @@ use std::marker::PhantomData;
 use proc_macro::TokenStream;
 use quote::ToTokens;
 use syn::{
-    Expr, ExprBlock, Ident, ImplItem, Item, ItemMod, ItemUse, Signature, Stmt, TraitItem,
-    parse_macro_input,
+    Expr, ExprBlock, GenericArgument, Ident, ImplItem, Item, ItemMod, ItemUse, PathArguments,
+    ReturnType, Signature, Stmt, TraitItem, Type, TypeParamBound, parse_macro_input,
     visit_mut::{VisitMut, visit_expr_mut, visit_signature_mut},
 };
 
@@ -74,6 +74,7 @@ pub fn syncify(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// * `#[syncify_replace]` items are replaced
 /// * `#[syncify_skip]` items are removed
 /// * `#[syncify_include]` attributes are removed
+/// * `-> impl Future<Output = T> + ...` becomes `-> T`
 struct Sync;
 
 /// Async visitor mode:
@@ -179,6 +180,7 @@ impl VisitMut for SyncifyVisitor<Sync> {
 
     fn visit_signature_mut(&mut self, i: &mut Signature) {
         i.asyncness = None;
+        replace_future_return(&mut i.output);
         visit_signature_mut(self, i);
     }
 
@@ -254,4 +256,35 @@ fn async_expr_pass(i: &Expr) -> Option<Expr> {
         }
         _ => return None,
     })
+}
+
+/// Replaces `-> impl Future<Output = T> + ...` with `-> T`.
+fn replace_future_return(i: &mut ReturnType) {
+    let ReturnType::Type(_, ty) = i else { return };
+    let Type::ImplTrait(impl_trait) = ty.as_ref() else {
+        return;
+    };
+    let new_ty = impl_trait.bounds.iter().find_map(|bound| {
+        let TypeParamBound::Trait(bound) = bound else {
+            return None;
+        };
+        let args = &bound
+            .path
+            .segments
+            .last()
+            .filter(|seg| seg.ident == "Future")?
+            .arguments;
+        let PathArguments::AngleBracketed(args) = args else {
+            return None;
+        };
+        args.args.iter().find_map(|arg| {
+            let GenericArgument::AssocType(assoc) = arg else {
+                return None;
+            };
+            assoc.ident.eq("Output").then(|| assoc.ty.clone())
+        })
+    });
+    if let Some(new_ty) = new_ty {
+        **ty = new_ty;
+    }
 }
