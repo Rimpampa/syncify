@@ -74,3 +74,20 @@ mod greet {
 ```
 
 The markers work on items inside impl blocks and traits too, and on `use` items.
+
+## Futures as return types
+
+Functions returning `impl Future` types are supported in both `impl` blocks and traits.
+In the synchronous copy, the `Output` type of the `Future` becomes the return type
+of the function.
+
+```rust
+#[syncify::syncify(task_sync)]
+mod task {
+    pub trait Task {
+        fn run(&self) -> impl std::future::Future<Output = u32> + Send + '_;
+    }
+}
+```
+
+The generated `task_sync` module contains `fn run(&self) -> u32;`.
