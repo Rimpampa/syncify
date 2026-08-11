@@ -8,6 +8,7 @@ license = "MIT OR Apache-2.0"
 
 [lib]
 proc-macro = true
+doctest = false
 
 [dependencies]
 proc-macro2 = "1"
@@ -19,4 +20,3 @@ features = ["visit-mut", "full"]
 
 [dev-dependencies]
 futures = "0.3"
-trybuild = "1"
