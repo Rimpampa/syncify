@@ -50,3 +50,27 @@ mod greet {
     }
 }
 ```
+
+Items can be routed to one copy or the other:
+
+* `#[syncify::skip]` keeps the item only in the original module and drops it
+  from the generated one (for code that must stay `async`).
+* `#[syncify::include]` moves the item out of the original module into the
+  generated one (for code that only makes sense synchronously).
+
+```rust
+#[syncify::syncify(greet_sync)]
+mod greet {
+    #[syncify::skip]
+    pub async fn stay_async() -> usize {
+        42
+    }
+
+    #[syncify::include]
+    pub fn only_sync() -> usize {
+        7
+    }
+}
+```
+
+The markers work on items inside impl blocks and traits too, and on `use` items.
