@@ -104,3 +104,18 @@ fn impl_marker_routing() {
     assert_eq!(block_on(asynch_state.both_get()), 3);
     assert_eq!(block_on(asynch_state.async_get()), 3);
 }
+
+#[syncify(blocks_sync)]
+mod blocks {
+    pub async fn compute() -> u32 {
+        let x = async { 5u32 }.await;
+        let y = async { 7u32 }.await;
+        x + y
+    }
+}
+
+#[test]
+fn async_blocks() {
+    assert_eq!(blocks_sync::compute(), 12);
+    assert_eq!(block_on(blocks::compute()), 12);
+}
