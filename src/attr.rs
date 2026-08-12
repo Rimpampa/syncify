@@ -15,11 +15,12 @@ impl<T: AttrsMut> AttrsMut for &mut T {
 }
 
 macro_rules! impl_attrs_mut {
-    ($($enum:ident => $type:ident),* $(,)?) => {
-        impl AttrsMut for syn::Item {
+    (enum $base:ident { $($enum:ident => $type:ident),* $(,)? }) => {
+        impl AttrsMut for syn::$base {
             fn attrs_mut(&mut self) -> &mut Vec<Attribute> {
                 match self {
-                    $(syn::Item::$enum(i) => i.attrs_mut(),)*
+                    $(syn::$base::$enum(i, ..) => i.attrs_mut(),)*
+                    #[allow(unreachable_patterns)]
                     _ => unimplemented!(),
                 }
             }
@@ -36,21 +37,41 @@ macro_rules! impl_attrs_mut {
 }
 
 impl_attrs_mut! {
-    Const => ItemConst,
-    Enum => ItemEnum,
-    ExternCrate => ItemExternCrate,
-    Fn => ItemFn,
-    ForeignMod => ItemForeignMod,
-    Impl => ItemImpl,
-    Macro => ItemMacro,
-    Mod => ItemMod,
-    Static => ItemStatic,
-    Struct => ItemStruct,
-    Trait => ItemTrait,
-    TraitAlias => ItemTraitAlias,
-    Type => ItemType,
-    Union => ItemUnion,
-    Use => ItemUse,
+    enum Item {
+        Const => ItemConst,
+        Enum => ItemEnum,
+        ExternCrate => ItemExternCrate,
+        Fn => ItemFn,
+        ForeignMod => ItemForeignMod,
+        Impl => ItemImpl,
+        Macro => ItemMacro,
+        Mod => ItemMod,
+        Static => ItemStatic,
+        Struct => ItemStruct,
+        Trait => ItemTrait,
+        TraitAlias => ItemTraitAlias,
+        Type => ItemType,
+        Union => ItemUnion,
+        Use => ItemUse,
+    }
+}
+
+impl_attrs_mut! {
+    enum ImplItem {
+        Const => ImplItemConst,
+        Fn => ImplItemFn,
+        Type => ImplItemType,
+        Macro => ImplItemMacro,
+    }
+}
+
+impl_attrs_mut! {
+    enum TraitItem {
+        Const => TraitItemConst,
+        Fn => TraitItemFn,
+        Type => TraitItemType,
+        Macro => TraitItemMacro,
+    }
 }
 
 /// Returns the path of the attribute
@@ -97,4 +118,20 @@ pub fn extract(item: &mut impl AttrsMut, name: &str) -> syn::Result<Option<Attri
         ));
     }
     Ok(first)
+}
+
+/// Removes the `syncify` **path only** attribute with the given name from the item's attributes,
+/// returning it if found.
+///
+/// Returns an error if the attribute is used multiple times or if it has a value
+/// (either as a list or a name-value pair).
+pub fn extract_path(item: &mut impl AttrsMut, name: &str) -> syn::Result<Option<Attribute>> {
+    let path_only = |attr: Attribute| match attr.meta {
+        Meta::Path(_) => Ok(attr),
+        _ => Err(syn::Error::new(
+            attr.span(),
+            format!("{name} attribute doesn't accept values"),
+        )),
+    };
+    extract(item, name).and_then(|attr| attr.map(path_only).transpose())
 }

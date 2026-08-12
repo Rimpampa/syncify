@@ -1,20 +1,40 @@
 #![doc = include_str!("../README.md")]
 
 mod attr;
+mod default;
 
 use std::marker::PhantomData;
 
 use proc_macro::TokenStream;
 use quote::ToTokens;
 use syn::{
-    Expr, Ident, ItemMod, ItemUse, Signature, parse_macro_input,
+    Expr, Ident, ImplItem, Item, ItemMod, ItemUse, Signature, TraitItem, parse_macro_input,
     visit_mut::{VisitMut, visit_expr_mut, visit_signature_mut},
+};
+
+use crate::{
+    attr::AttrsMut,
+    default::{Empty, VisitorMut},
 };
 
 #[proc_macro_attribute]
 /// Annotate `use` declarations with this to replace them in the syncified copy.
 pub fn syncify_replace(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let error = outside_use_error("syncify_replace").into_compile_error();
+    join(item, error)
+}
+
+#[proc_macro_attribute]
+/// Annotate an item with this to **skip** it in the syncified copy.
+pub fn syncify_skip(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let error = outside_use_error("syncify_skip").into_compile_error();
+    join(item, error)
+}
+
+#[proc_macro_attribute]
+/// Annotate an item with this to include it **only** in the syncified copy.
+pub fn syncify_include(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let error = outside_use_error("syncify_include").into_compile_error();
     join(item, error)
 }
 
@@ -50,10 +70,14 @@ pub fn syncify(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// * `async fn` becomes `fn`
 /// * `expr.await` becomes `expr`
 /// * `#[syncify_replace]` items are replaced
+/// * `#[syncify_skip]` items are removed
+/// * `#[syncify_include]` attributes are removed
 struct Sync;
 
 /// Async visitor mode:
 /// * `#[syncify_replace]` attributes are removed
+/// * `#[syncify_include]` items are removed
+/// * `#[syncify_skip]` attributes are removed
 struct Async;
 
 /// Handle changes across the sync and async versions of the
@@ -87,9 +111,63 @@ impl<Mode> SyncifyVisitor<Mode> {
                 .into(),
         )
     }
+
+    /// Removes the entire `Item` if the fiven attribute is found.
+    ///
+    /// Removing here means replacing with its [`Empty`] equivalent.
+    fn remove_if_attr<T: AttrsMut + Empty>(&mut self, i: &mut T, attr: &str) -> bool {
+        let res = attr::extract_path(i, attr);
+        match res.map_err(|e| self.errors.push(e)) {
+            Ok(Some(_)) => *i = T::empty(),
+            _ => return false,
+        }
+        true
+    }
+}
+
+impl SyncifyVisitor<Sync> {
+    /// [`Sync`] mode implementation of the `syncify_include` and `syncify_skip` attributes for `Item`-like types.
+    fn skip_include_impl<T: AttrsMut + Empty + VisitorMut>(&mut self, i: &mut T) {
+        // `syncify_include` attribute:
+        // drop references to the attribute, any error is handled by the
+        // sync mode visitor.
+        let _ = attr::extract(i, "syncify_include");
+        // `syncify_skip` attribute:
+        // remove the `Item` if found.
+        if !self.remove_if_attr(i, "syncify_skip") {
+            i.visit_mut(self);
+        }
+    }
+}
+
+impl SyncifyVisitor<Async> {
+    /// [`Async`] mode implementation of the `syncify_include` and `syncify_skip` attributes for `Item`-like types.
+    fn skip_include_impl<T: AttrsMut + Empty + VisitorMut>(&mut self, i: &mut T) {
+        // `syncify_skip` attribute:
+        // drop references to the attribute, any error is handled by the
+        // sync mode visitor.
+        let _ = attr::extract(i, "syncify_skip");
+        // `syncify_include` attribute:
+        // remove the `Item` if found.
+        if !self.remove_if_attr(i, "syncify_include") {
+            i.visit_mut(self);
+        }
+    }
 }
 
 impl VisitMut for SyncifyVisitor<Sync> {
+    fn visit_item_mut(&mut self, i: &mut Item) {
+        self.skip_include_impl(i)
+    }
+
+    fn visit_impl_item_mut(&mut self, i: &mut ImplItem) {
+        self.skip_include_impl(i)
+    }
+
+    fn visit_trait_item_mut(&mut self, i: &mut TraitItem) {
+        self.skip_include_impl(i)
+    }
+
     fn visit_expr_mut(&mut self, i: &mut Expr) {
         visit_expr_mut(self, i);
         if let Expr::Await(expr) = i {
@@ -124,6 +202,18 @@ impl VisitMut for SyncifyVisitor<Sync> {
 }
 
 impl VisitMut for SyncifyVisitor<Async> {
+    fn visit_item_mut(&mut self, i: &mut Item) {
+        self.skip_include_impl(i)
+    }
+
+    fn visit_impl_item_mut(&mut self, i: &mut ImplItem) {
+        self.skip_include_impl(i)
+    }
+
+    fn visit_trait_item_mut(&mut self, i: &mut TraitItem) {
+        self.skip_include_impl(i)
+    }
+
     fn visit_item_use_mut(&mut self, i: &mut ItemUse) {
         let _ = attr::extract(i, "syncify_replace");
     }
