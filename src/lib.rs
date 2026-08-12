@@ -8,7 +8,8 @@ use std::marker::PhantomData;
 use proc_macro::TokenStream;
 use quote::ToTokens;
 use syn::{
-    Expr, Ident, ImplItem, Item, ItemMod, ItemUse, Signature, TraitItem, parse_macro_input,
+    Expr, ExprBlock, Ident, ImplItem, Item, ItemMod, ItemUse, Signature, Stmt, TraitItem,
+    parse_macro_input,
     visit_mut::{VisitMut, visit_expr_mut, visit_signature_mut},
 };
 
@@ -69,6 +70,7 @@ pub fn syncify(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Sync visitor mode:
 /// * `async fn` becomes `fn`
 /// * `expr.await` becomes `expr`
+/// * `async { .. }` becomes `{ .. }`
 /// * `#[syncify_replace]` items are replaced
 /// * `#[syncify_skip]` items are removed
 /// * `#[syncify_include]` attributes are removed
@@ -237,6 +239,19 @@ fn join(a: impl Into<TokenStream>, b: impl Into<TokenStream>) -> TokenStream {
 fn async_expr_pass(i: &Expr) -> Option<Expr> {
     Some(match i {
         Expr::Await(expr) => *expr.base.clone(),
+        Expr::Async(expr) => {
+            // Drop the useless braces when the block is a single
+            // expression.
+            if let [Stmt::Expr(expr, None)] = expr.block.stmts.as_slice() {
+                expr.clone()
+            } else {
+                Expr::Block(ExprBlock {
+                    attrs: expr.attrs.clone(),
+                    block: expr.block.clone(),
+                    label: None,
+                })
+            }
+        }
         _ => return None,
     })
 }
