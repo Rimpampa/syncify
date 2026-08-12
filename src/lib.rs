@@ -10,7 +10,9 @@ use quote::ToTokens;
 use syn::{
     Expr, ExprBlock, ExprClosure, GenericArgument, Ident, ImplItem, Item, ItemMod, ItemUse,
     PathArguments, ReturnType, Signature, Stmt, TraitItem, Type, TypeParamBound, parse_macro_input,
-    visit_mut::{VisitMut, visit_expr_mut, visit_signature_mut},
+    visit_mut::{
+        VisitMut, visit_expr_closure_mut, visit_expr_mut, visit_ident_mut, visit_signature_mut,
+    },
 };
 
 use crate::{
@@ -207,6 +209,18 @@ impl VisitMut for SyncifyVisitor<Sync> {
     fn visit_expr_closure_mut(&mut self, i: &mut ExprClosure) {
         i.asyncness = None;
         visit_expr_closure_mut(self, i);
+    }
+
+    fn visit_ident_mut(&mut self, i: &mut proc_macro2::Ident) {
+        if i == "AsyncFn" {
+            *i = Ident::new("Fn", i.span());
+        } else if i == "AsyncFnMut" {
+            *i = Ident::new("FnMut", i.span());
+        } else if i == "AsyncFnOnce" {
+            *i = Ident::new("FnOnce", i.span());
+        } else {
+            visit_ident_mut(self, i);
+        }
     }
 }
 
