@@ -85,3 +85,45 @@ fn impl_marker_routing() {
     assert_eq!(block_on(asynch_state.both_get()), 3);
     assert_eq!(block_on(asynch_state.async_get()), 3);
 }
+
+#[syncify(trait_markers_sync)]
+mod trait_markers {
+    pub trait Task {
+        #[syncify::syncify_skip]
+        async fn async_only(&self) -> u32;
+
+        #[syncify::syncify_include]
+        fn sync_only(&self) -> u32;
+
+        async fn both(&self) -> u32;
+    }
+
+    pub struct Job;
+
+    impl Task for Job {
+        #[syncify::syncify_skip]
+        async fn async_only(&self) -> u32 {
+            1
+        }
+
+        #[syncify::syncify_include]
+        fn sync_only(&self) -> u32 {
+            2
+        }
+
+        async fn both(&self) -> u32 {
+            3
+        }
+    }
+}
+
+#[test]
+fn trait_marker_routing() {
+    use trait_markers::Task as _;
+    use trait_markers_sync::Task as _;
+
+    assert_eq!(block_on(trait_markers::Job.async_only()), 1);
+    assert_eq!(block_on(trait_markers::Job.both()), 3);
+    assert_eq!(trait_markers_sync::Job.both(), 3);
+    assert_eq!(trait_markers_sync::Job.sync_only(), 2);
+}
