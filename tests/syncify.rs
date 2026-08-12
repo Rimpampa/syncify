@@ -120,6 +120,36 @@ fn async_blocks() {
     assert_eq!(block_on(blocks::compute()), 12);
 }
 
+#[syncify(closure_sync)]
+mod closure {
+    pub async fn compute() -> u32 {
+        let add = async |x: u32, y: u32| x + y;
+        add(5u32, 7u32).await
+    }
+}
+
+#[test]
+fn async_closures() {
+    assert_eq!(closure_sync::compute(), 12);
+    assert_eq!(block_on(closure::compute()), 12);
+}
+
+#[syncify(asyncfn_sync)]
+mod asyncfn {
+    pub async fn call<F>(f: F) -> u32
+    where
+        F: AsyncFnOnce() -> u32,
+    {
+        f().await
+    }
+}
+
+#[test]
+fn asyncfn_to_fn() {
+    assert_eq!(asyncfn_sync::call(|| 42u32), 42);
+    assert_eq!(block_on(asyncfn::call(async || 42u32)), 42);
+}
+
 #[syncify(traits_rpitit_sync)]
 mod traits_rpitit {
     pub trait Task {
