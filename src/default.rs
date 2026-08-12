@@ -1,4 +1,5 @@
-use syn::visit_mut::VisitMut;
+use syn::*;
+use visit_mut::*;
 
 /// A trait for retrieving the default [`VisitMut`] provided by the [`syn`] crate.
 pub trait VisitorMut {
@@ -13,15 +14,15 @@ pub trait Empty {
 macro_rules! impl_defaults {
     ($($t:ident => $impl:ident),* $(,)?) => {
         $(
-            impl VisitorMut for syn::$t {
+            impl VisitorMut for $t {
                 fn visit_mut<V: VisitMut + ?Sized>(&mut self, v: &mut V) {
-                    syn::visit_mut::$impl(v, self);
+                    $impl(v, self);
                 }
             }
 
-            impl Empty for syn::$t {
+            impl Empty for $t {
                 fn empty() -> Self {
-                    syn::$t::Verbatim(Default::default())
+                    $t::Verbatim(Default::default())
                 }
             }
         )*

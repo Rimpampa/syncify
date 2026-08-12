@@ -7,13 +7,8 @@ use std::marker::PhantomData;
 
 use proc_macro::TokenStream;
 use quote::ToTokens;
-use syn::{
-    Expr, ExprBlock, ExprClosure, GenericArgument, Ident, ImplItem, Item, ItemMod, ItemUse,
-    PathArguments, ReturnType, Signature, Stmt, TraitItem, Type, TypeParamBound, parse_macro_input,
-    visit_mut::{
-        VisitMut, visit_expr_closure_mut, visit_expr_mut, visit_ident_mut, visit_signature_mut,
-    },
-};
+use syn::*;
+use visit_mut::*;
 
 use crate::{
     attr::AttrsMut,
@@ -89,7 +84,7 @@ struct Async;
 /// modules to which `syncify` is applied.
 struct SyncifyVisitor<Mode> {
     /// Errors collected during the syncify process.
-    errors: Vec<syn::Error>,
+    errors: Vec<Error>,
     _mode: PhantomData<Mode>,
 }
 
@@ -193,7 +188,7 @@ impl VisitMut for SyncifyVisitor<Sync> {
         match attr::extract(i, "syncify_replace") {
             Ok(Some(attr)) => {
                 let mut replacement = None;
-                match syn::parse2::<syn::UseTree>(attr::tokens(attr).clone()) {
+                match parse2::<UseTree>(attr::tokens(attr).clone()) {
                     Ok(rep) => replacement = Some(rep),
                     Err(err) => self.errors.push(err),
                 }
@@ -244,8 +239,8 @@ impl VisitMut for SyncifyVisitor<Async> {
 
 /// Returns an error indicating that the `name` macro can only be used inside a
 /// module marked with `#[syncify::syncify]`.
-fn outside_use_error(name: &str) -> syn::Error {
-    syn::Error::new(
+fn outside_use_error(name: &str) -> Error {
+    Error::new(
         proc_macro2::Span::call_site(),
         format!("`{name}` can only be used inside a module marked with `#[syncify::syncify]`"),
     )

@@ -1,6 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::ToTokens;
-use syn::{AttrStyle, Attribute, Meta, spanned::Spanned};
+use spanned::Spanned;
+use syn::*;
 
 /// Trait for mutable access to the attributes of an item.
 pub trait AttrsMut {
@@ -16,10 +17,10 @@ impl<T: AttrsMut> AttrsMut for &mut T {
 
 macro_rules! impl_attrs_mut {
     (enum $base:ident { $($enum:ident => $type:ident),* $(,)? }) => {
-        impl AttrsMut for syn::$base {
+        impl AttrsMut for $base {
             fn attrs_mut(&mut self) -> &mut Vec<Attribute> {
                 match self {
-                    $(syn::$base::$enum(i, ..) => i.attrs_mut(),)*
+                    $($base::$enum(i, ..) => i.attrs_mut(),)*
                     #[allow(unreachable_patterns)]
                     _ => unimplemented!(),
                 }
@@ -27,7 +28,7 @@ macro_rules! impl_attrs_mut {
         }
 
         $(
-            impl AttrsMut for syn::$type {
+            impl AttrsMut for $type {
                 fn attrs_mut(&mut self) -> &mut Vec<Attribute> {
                     &mut self.attrs
                 }
@@ -75,7 +76,7 @@ impl_attrs_mut! {
 }
 
 /// Returns the path of the attribute
-pub fn path(attr: &Attribute) -> &syn::Path {
+pub fn path(attr: &Attribute) -> &Path {
     match &attr.meta {
         Meta::Path(path) => path,
         Meta::List(list) => &list.path,
@@ -104,7 +105,7 @@ pub fn is_syncify(attr: &Attribute, name: &str) -> bool {
 /// returning it if found.
 ///
 /// Returns an error if the attribute is used multiple times.
-pub fn extract(item: &mut impl AttrsMut, name: &str) -> syn::Result<Option<Attribute>> {
+pub fn extract(item: &mut impl AttrsMut, name: &str) -> Result<Option<Attribute>> {
     let mut iter = item
         .attrs_mut()
         .extract_if(.., |attr| is_syncify(attr, name));
@@ -112,7 +113,7 @@ pub fn extract(item: &mut impl AttrsMut, name: &str) -> syn::Result<Option<Attri
     // NOTE: last() ensures the iterator is advanced to the end,
     //       meaning that all the attributes have been extracted/dropped.
     if let Some(last) = iter.last() {
-        return Err(syn::Error::new(
+        return Err(Error::new(
             last.span(),
             format!("{name} attribute used multiple times"),
         ));
@@ -125,10 +126,10 @@ pub fn extract(item: &mut impl AttrsMut, name: &str) -> syn::Result<Option<Attri
 ///
 /// Returns an error if the attribute is used multiple times or if it has a value
 /// (either as a list or a name-value pair).
-pub fn extract_path(item: &mut impl AttrsMut, name: &str) -> syn::Result<Option<Attribute>> {
+pub fn extract_path(item: &mut impl AttrsMut, name: &str) -> Result<Option<Attribute>> {
     let path_only = |attr: Attribute| match attr.meta {
         Meta::Path(_) => Ok(attr),
-        _ => Err(syn::Error::new(
+        _ => Err(Error::new(
             attr.span(),
             format!("{name} attribute doesn't accept values"),
         )),
