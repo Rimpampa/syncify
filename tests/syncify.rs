@@ -119,3 +119,27 @@ fn async_blocks() {
     assert_eq!(blocks_sync::compute(), 12);
     assert_eq!(block_on(blocks::compute()), 12);
 }
+
+#[syncify(traits_rpitit_sync)]
+mod traits_rpitit {
+    pub trait Task {
+        // Desugared AFIT form, avoids the `async_fn_in_trait` warning.
+        fn run(&self) -> impl std::future::Future<Output = u32> + Send + '_;
+    }
+
+    pub struct Job;
+
+    impl Task for Job {
+        async fn run(&self) -> u32 {
+            42
+        }
+    }
+}
+
+#[test]
+fn trait_desugared_form() {
+    use traits_rpitit::Task as _;
+    use traits_rpitit_sync::Task as _;
+    assert_eq!(traits_rpitit_sync::Job.run(), 42);
+    assert_eq!(block_on(traits_rpitit::Job.run()), 42);
+}
