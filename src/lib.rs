@@ -169,10 +169,10 @@ impl VisitMut for SyncifyVisitor<Sync> {
     }
 
     fn visit_expr_mut(&mut self, i: &mut Expr) {
-        visit_expr_mut(self, i);
-        if let Expr::Await(expr) = i {
-            *i = *expr.base.clone();
+        while let Some(replace) = async_expr_pass(i) {
+            *i = replace;
         }
+        visit_expr_mut(self, i);
     }
 
     fn visit_signature_mut(&mut self, i: &mut Signature) {
@@ -231,4 +231,12 @@ fn outside_use_error(name: &str) -> syn::Error {
 /// Joins two token streams together, in the order they are provided.
 fn join(a: impl Into<TokenStream>, b: impl Into<TokenStream>) -> TokenStream {
     [a.into(), b.into()].into_iter().collect()
+}
+
+/// Replaces `await` and `async` expressions with their inner expressions.
+fn async_expr_pass(i: &Expr) -> Option<Expr> {
+    Some(match i {
+        Expr::Await(expr) => *expr.base.clone(),
+        _ => return None,
+    })
 }
