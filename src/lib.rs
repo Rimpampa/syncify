@@ -8,8 +8,8 @@ use std::marker::PhantomData;
 use proc_macro::TokenStream;
 use quote::ToTokens;
 use syn::{
-    Expr, ExprBlock, GenericArgument, Ident, ImplItem, Item, ItemMod, ItemUse, PathArguments,
-    ReturnType, Signature, Stmt, TraitItem, Type, TypeParamBound, parse_macro_input,
+    Expr, ExprBlock, ExprClosure, GenericArgument, Ident, ImplItem, Item, ItemMod, ItemUse,
+    PathArguments, ReturnType, Signature, Stmt, TraitItem, Type, TypeParamBound, parse_macro_input,
     visit_mut::{VisitMut, visit_expr_mut, visit_signature_mut},
 };
 
@@ -202,6 +202,11 @@ impl VisitMut for SyncifyVisitor<Sync> {
             Err(e) => self.errors.push(e),
             Ok(None) => {}
         }
+    }
+
+    fn visit_expr_closure_mut(&mut self, i: &mut ExprClosure) {
+        i.asyncness = None;
+        visit_expr_closure_mut(self, i);
     }
 }
 
