@@ -1,93 +1,86 @@
 # Syncify
 
+[![crates.io](https://img.shields.io/crates/v/syncify.svg)](https://crates.io/crates/syncify)
+[![docs.rs](https://docs.rs/syncify/badge.svg)](https://docs.rs/syncify)
+
 Write a module once, get a synchronous copy generated.
 
 `#[syncify::syncify(name)]` on an inline module leaves the module as-is and
 generates an additional sibling module with the given name, containing a
-synchronous version of the same items: all `async` function modifiers and all
-`.await` suffixes are stripped.
-
-Example:
+synchronous version of the same items.
 
 ```rust
-#[syncify::syncify(greet_sync)]
-mod greet {
-    pub async fn do_greet(name: &str) -> usize {
-        speak(name).await;
-        name.len()
+use syncify::*;
+
+#[syncify(repo_sync)]
+mod repo {
+    use super::*;
+
+    // Swaps the async `foo` for a sync counterpart.
+    #[syncify_replace(sync_crate::foo)]
+    use async_crate::foo;
+
+    // `async fn` becomes `fn`.
+    pub async fn bar() {
+        // `.await` suffixes are stripped.
+        foo().await;
     }
+
+    pub fn baz<T>(
+        // `AsyncFn*` becomes `Fn*`.
+        f: impl AsyncFn() -> T
+    // `impl Future<Output = T>` becomes `T`.
+    ) -> impl Future<Output = T> {
+        // `async { .. }` becomes `{ .. }`.
+        async {
+            f().await
+        }
+    }
+
+    // `syncify_skip`: kept only in the original (async) module.
+    #[syncify_skip]
+    pub async fn async_only() {}
+
+    // `syncify_include`: kept only in the generated (sync) module.
+    #[syncify_include]
+    pub fn blocking_only() {}
 }
 ```
 
-The attributes are invoked with a fully qualified path so they resolve in any
-module. When the annotated module lives in the same module as a `use` import,
-the bare name works as well:
+Results in the generated `repo_sync` module:
 
 ```rust
-use syncify::syncify;
+mod repo {
+    use async_crate::foo;
 
-#[syncify(greet_sync)]
-mod greet {
-    pub async fn do_greet(name: &str) -> usize {
-        speak(name).await;
-        name.len()
+    pub async fn bar() {
+        foo().await;
     }
+
+    pub fn baz<T>(
+        f: impl AsyncFn() -> T
+    ) -> impl Future<Output = T> {
+        async {
+            f().await
+        }
+    }
+
+    pub async fn async_only() {}
+}
+
+mod repo_sync {
+    use sync_crate::foo;
+
+    pub fn bar() {
+        foo();
+    }
+
+    pub fn baz<T>(f: impl Fn() -> T) -> T {
+        f()
+    }
+
+    pub fn blocking_only() {}
 }
 ```
 
-`use` items can be replaced in the synchronous copy with
-`#[syncify::syncify_replace(...)]`:
-
-```rust
-#[syncify::syncify(greet_sync)]
-mod greet {
-    #[syncify::syncify_replace(crate::speaking_sync::speak)] // A sync function for speaking.
-    use crate::speaking::speak; // An async function for speaking.
-
-    pub async fn do_greet(name: &str) -> usize {
-        speak(name).await;
-        name.len()
-    }
-}
-```
-
-Items can be routed to one copy or the other:
-
-* `#[syncify::skip]` keeps the item only in the original module and drops it
-  from the generated one (for code that must stay `async`).
-* `#[syncify::include]` moves the item out of the original module into the
-  generated one (for code that only makes sense synchronously).
-
-```rust
-#[syncify::syncify(greet_sync)]
-mod greet {
-    #[syncify::skip]
-    pub async fn stay_async() -> usize {
-        42
-    }
-
-    #[syncify::include]
-    pub fn only_sync() -> usize {
-        7
-    }
-}
-```
-
-The markers work on items inside impl blocks and traits too, and on `use` items.
-
-## Futures as return types
-
-Functions returning `impl Future` types are supported in both `impl` blocks and traits.
-In the synchronous copy, the `Output` type of the `Future` becomes the return type
-of the function.
-
-```rust
-#[syncify::syncify(task_sync)]
-mod task {
-    pub trait Task {
-        fn run(&self) -> impl std::future::Future<Output = u32> + Send + '_;
-    }
-}
-```
-
-The generated `task_sync` module contains `fn run(&self) -> u32;`.
+See the [documentation](https://docs.rs/syncify) for the full reference.

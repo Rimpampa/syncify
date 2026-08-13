@@ -1,4 +1,47 @@
-#![doc = include_str!("../README.md")]
+//! Write a module once, get a synchronous copy generated.
+//!
+//! The [`syncify`] attribute on an inline module leaves the module as-is and
+//! generates an additional sibling module with the given name, containing a
+//! synchronous version of the same items.
+//!
+//! ```no_run
+//! # use syncify::syncify;
+//! # mod async_crate { pub async fn foo() {} }
+//! # mod sync_crate { pub fn foo() {} }
+//! #[syncify(repo_sync)]
+//! mod repo {
+//! #   use super::*;
+//!     // Swaps the async `foo` for a sync counterpart.
+//!     #[syncify_replace(sync_crate::foo)]
+//!     use async_crate::foo;
+//!
+//!     // `async fn` becomes `fn`.
+//!     pub async fn bar() {
+//!         // `.await` suffixes are stripped.
+//!         foo().await;
+//!     }
+//!
+//!     pub fn baz<T>(
+//!         // `AsyncFn*` becomes `Fn*`.
+//!         f: impl AsyncFn() -> T
+//!     // `impl Future<Output = T>` becomes `T`.
+//!     ) -> impl Future<Output = T> {
+//!         // `async { .. }` becomes `{ .. }`.
+//!         async move {
+//!             f().await
+//!         }
+//!     }
+//!
+//!     // `syncify_skip`: kept only in the original (async) module.
+//!     #[syncify_skip]
+//!     pub async fn async_only() {}
+//!
+//!     // `syncify_include`: kept only in the generated (sync) module.
+//!     #[syncify_include]
+//!     pub fn blocking_only() {}
+//! }
+//! # fn main() {}
+//! ```
 
 mod attr;
 mod default;
@@ -15,29 +58,118 @@ use crate::{
     default::{Empty, VisitorMut},
 };
 
+/// Replaces a `use` item in the synchronous copy.
+///
+/// The annotated `use` declaration is replaced by the given replacement in the
+/// generated module, while the original module keeps the annotated `use`.
+///
+/// # Example
+///
+/// ```
+/// # use syncify::syncify;
+/// mod helper {
+///     pub async fn value() -> i32 {
+///         1
+///     }
+/// }
+///
+/// mod helper_sync {
+///     pub fn value() -> i32 {
+///         2
+///     }
+/// }
+///
+/// #[syncify(replace_sync)]
+/// mod replace {
+///     #[syncify_replace(crate::helper_sync::value)]
+///     use crate::helper::value;
+///
+///     pub async fn get() -> i32 {
+///         value().await
+///     }
+/// }
+///
+/// # fn main() {
+/// use futures::executor::block_on;
+/// assert_eq!(replace_sync::get(), 2);
+/// assert_eq!(block_on(replace::get()), 1);
+/// # }
+/// ```
 #[proc_macro_attribute]
-/// Annotate `use` declarations with this to replace them in the syncified copy.
 pub fn syncify_replace(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let error = outside_use_error("syncify_replace").into_compile_error();
     join(item, error)
 }
 
+/// Keeps an item only in the original module.
+///
+/// The annotated item is removed from the generated synchronous module and
+/// kept in the original one. Use it for code that must stay `async`.
+///
+/// # Example
+///
+/// ```
+/// # use syncify::syncify;
+/// # use futures::executor::block_on;
+/// #[syncify(only_sync)]
+/// mod only {
+///     #[syncify_skip]
+///     pub async fn async_only_val() -> u32 {
+///         1
+///     }
+/// }
+///
+/// # fn main() {
+/// assert_eq!(block_on(only::async_only_val()), 1);
+/// # }
+/// ```
 #[proc_macro_attribute]
-/// Annotate an item with this to **skip** it in the syncified copy.
 pub fn syncify_skip(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let error = outside_use_error("syncify_skip").into_compile_error();
     join(item, error)
 }
 
+/// Keeps an item only in the generated synchronous module.
+///
+/// The annotated item is removed from the original module and kept in the
+/// generated one. Use it for code that only makes sense synchronously.
+///
+/// # Example
+///
+/// ```
+/// # use syncify::syncify;
+/// #[syncify(only_sync)]
+/// mod only {
+///     #[syncify_include]
+///     pub fn blocking_only_val() -> u32 {
+///         2
+///     }
+/// }
+///
+/// # fn main() {
+/// assert_eq!(only_sync::blocking_only_val(), 2);
+/// # }
+/// ```
 #[proc_macro_attribute]
-/// Annotate an item with this to include it **only** in the syncified copy.
 pub fn syncify_include(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let error = outside_use_error("syncify_include").into_compile_error();
     join(item, error)
 }
 
+/// Produces a synchronous copy of the annotated module, stripping `async` and `.await`.
+///
+/// The annotated module is left as-is and a sibling module with the given
+/// `name` is generated, containing a synchronous version of the same items:
+///
+/// * `async fn` becomes `fn`
+/// * `expr.await` becomes `expr`
+/// * `async { .. }` blocks become `{ .. }`
+/// * `async |..|` closures become `|..|` closures
+/// * `AsyncFn*` trait bounds become `Fn*` trait bounds
+/// * `-> impl Future<Output = T> + ...` return types become `-> T`
+///
+/// Check [`crate`] level documentation for a full example.
 #[proc_macro_attribute]
-/// Produce a synchronous copy of the annotated module, stripping `async` and `.await`.
 pub fn syncify(attr: TokenStream, item: TokenStream) -> TokenStream {
     let sync_mod_name = parse_macro_input!(attr as Ident);
 
