@@ -1,6 +1,6 @@
 [package]
 name = "syncify"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "A simple macro for writing async functions once and getting both the async version and a sync version that strips all async function modifiers and all .await suffixes."
 repository = "https://github.com/worm-blossom/syncify"
